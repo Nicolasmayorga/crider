@@ -16,7 +16,7 @@ class Profile(CRideModel):
 
     picture = models.ImageField(
         'profile picture',
-        upload_to='user/pictures/',
+        upload_to='users/pictures/',
         blank=True,
         null=True
     )
@@ -26,7 +26,7 @@ class Profile(CRideModel):
     # Stats
 
     rides_taken = models.PositiveIntegerField(default=0)
-    rides_offered = models.PositiveSmallIntegerField(default=0)
+    rides_offered = models.PositiveIntegerField(default=0)
     reputation = models.FloatField(
         default=5.0,
         help_text="User's reputation based on the rides taken and offered"
