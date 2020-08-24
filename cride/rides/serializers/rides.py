@@ -7,9 +7,39 @@ from rest_framework import serializers
 from cride.circles.models import Membership
 from cride.rides.models import Ride
 
+# Serializers
+from cride.users.serializers import UserModelSerializer
+
 # Utilities
 from datetime import timedelta
 from django.utils import timezone
+
+
+class RideModelSerializer(serializers.ModelSerializer):
+    """Ride model serializer."""
+
+    offered_by = UserModelSerializer(read_only=True)
+    offered_in = serializers.StringRelatedField()
+
+    passengers = UserModelSerializer(read_only=True, many=True)
+
+    class Meta:
+        """Meta class."""
+
+        model = Ride
+        fields = '__all__'
+        read_only_fields = (
+            'offered_by',
+            'offered_in',
+            'rating'
+        )
+
+    def update(self, instance, data):
+        """Allow updates only before departure date."""
+        now = timezone.now()
+        if instance.departure_date <= now:
+            raise serializers.ValidationError('Ongoing rides cannot be modified.')
+        return super(RideModelSerializer, self).update(instance, data)
 
 
 class CreateRideSerializer(serializers.ModelSerializer):
@@ -32,8 +62,7 @@ class CreateRideSerializer(serializers.ModelSerializer):
                 'Departure time must be at least pass the next 20 minutes window.'
             )
         return data
-    
-    
+
     def validate(self, data):
         """Validate.
         Verify that the person who offers the ride is member
@@ -59,7 +88,6 @@ class CreateRideSerializer(serializers.ModelSerializer):
         self.context['membership'] = membership
         return data
 
-    
     def create(self, data):
         """Create ride and update stats."""
         circle = self.context['circle']
