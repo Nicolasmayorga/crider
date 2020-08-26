@@ -33,6 +33,4 @@ EMAIL_PORT = 1025
 # django-extensions
 INSTALLED_APPS += ['django_extensions']  # noqa F405
 
-# Celery
-CELERY_TASK_ALWAYS_EAGER = True
-CELERY_TASK_EAGER_PROPAGATES = True
+

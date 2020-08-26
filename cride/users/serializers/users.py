@@ -3,10 +3,7 @@
 # Django
 from django.conf import settings
 from django.contrib.auth import password_validation, authenticate
-from django.core.mail import EmailMultiAlternatives
 from django.core.validators import RegexValidator
-from django.template.loader import render_to_string
-from django.utils import timezone
 
 # Django REST Framework
 from rest_framework import serializers
@@ -15,6 +12,9 @@ from rest_framework.validators import UniqueValidator
 
 # Models
 from cride.users.models import User, Profile
+
+# Tasks
+from cride.taskapp.tasks import send_confirmation_email
 
 # Serializers
 from cride.users.serializers.profiles import ProfileModelSerializer
@@ -42,83 +42,52 @@ class UserModelSerializer(serializers.ModelSerializer):
             'profile'
         )
 
+
 class UserSignUpSerializer(serializers.Serializer):
-    """"User Sign Up Serializer
-    
-    Handle sign up data validation and user/profile creation"""
-    
+    """User sign up serializer.
+    Handle sign up data validation and user/profile creation.
+    """
+
     email = serializers.EmailField(
-        validators = [
-            UniqueValidator(queryset=User.objects.all())
-        ]
+        validators=[UniqueValidator(queryset=User.objects.all())]
     )
     username = serializers.CharField(
-        min_length = 4,
-        max_length = 20,
-        validators = [
-            UniqueValidator(queryset=User.objects.all())
-        ]
+        min_length=4,
+        max_length=20,
+        validators=[UniqueValidator(queryset=User.objects.all())]
     )
-    
-    # Phone Number
+
+    # Phone number
     phone_regex = RegexValidator(
         regex=r'\+?1?\d{9,15}$',
-        message= "Phone number must be entered in the format: +999999999. Up to 15 digits allowed"
+        message="Phone number must be entered in the format: +999999999. Up to 15 digits allowed."
     )
-    
     phone_number = serializers.CharField(validators=[phone_regex])
-    
-    #Password
-    
-    password = serializers.CharField(min_length= 8, max_length=64)
-    password_confirmation = serializers.CharField(min_length= 8, max_length=64)
-    
-    #Name
-    last_name = serializers.CharField(min_length=2, max_length=30)    
+
+    # Password
+    password = serializers.CharField(min_length=8, max_length=64)
+    password_confirmation = serializers.CharField(min_length=8, max_length=64)
+
+    # Name
+    first_name = serializers.CharField(min_length=2, max_length=30)
     last_name = serializers.CharField(min_length=2, max_length=30)
-    
+
     def validate(self, data):
-        """verify passwords match"""
+        """Verify passwords match."""
         passwd = data['password']
         passwd_conf = data['password_confirmation']
         if passwd != passwd_conf:
-            raise serializers.ValidationError("Password don't match")
+            raise serializers.ValidationError("Passwords don't match.")
         password_validation.validate_password(passwd)
         return data
 
-
     def create(self, data):
-        """Handle user and profile creation"""
+        """Handle user and profile creation."""
         data.pop('password_confirmation')
-        user = User.objects.create_user(**data, is_verified=False, client=True)
+        user = User.objects.create_user(**data, is_verified=False, is_client=True)
         Profile.objects.create(user=user)
-        self.send_confirmation_email(user)
+        send_confirmation_email.delay(user_pk=user.pk)
         return user
-    
-    def send_confirmation_email(self, user):
-        """Send account verification link to given user"""
-        verification_token = self.gen_verification_token(user)
-        subject = 'Welcome @{}! Verify your account to start using Comparte Ride'.format(user.username)
-        from_email = 'Comparte Ride <noreply@comparteride.com>'
-        html_content = render_to_string(
-            'emails/users/account_verification.html',
-            {'token': verification_token, 'user':user}
-        )
-        msg = EmailMultiAlternatives(subject, html_content, from_email, [user.email])
-        msg.attach_alternative(html_content, "text/html")
-        msg.send()
-        
-    def gen_verification_token(self, user):
-        """Create JWT token that user can use to verify its account"""
-        exp_date= timezone.now() + timedelta(days=8)
-        payload = {
-            'user': user.username,
-            'exp': int(exp_date.timestamp()),
-            'type': 'email_confirmation'
-            
-        }
-        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
-        return token.decode()
 
 
 class UserLoginSerializer(serializers.Serializer):
@@ -135,7 +104,7 @@ class UserLoginSerializer(serializers.Serializer):
         if not user:
             raise serializers.ValidationError('Invalid credentials')
         if not user.is_verified:
-            raise serializers.ValidationError('Account is not activate yet :(')
+            raise serializers.ValidationError('Account is not active yet :(')
         self.context['user'] = user
         return data
 
@@ -143,29 +112,29 @@ class UserLoginSerializer(serializers.Serializer):
         """Generate or retrieve new token."""
         token, created = Token.objects.get_or_create(user=self.context['user'])
         return self.context['user'], token.key
-    
+
 
 class AccountVerificationSerializer(serializers.Serializer):
-    """Account verification serializer """
-    
+    """Account verification serializer."""
+
     token = serializers.CharField()
-    
+
     def validate_token(self, data):
-        """Verification Token"""
+        """Verify token is valid."""
         try:
             payload = jwt.decode(data, settings.SECRET_KEY, algorithms=['HS256'])
         except jwt.ExpiredSignatureError:
-            raise serializers.ValidationError('Verification link has expired')
+            raise serializers.ValidationError('Verification link has expired.')
         except jwt.PyJWTError:
-            raise serializers.ValidationError('invalid Token')
+            raise serializers.ValidationError('Invalid token')
         if payload['type'] != 'email_confirmation':
-            raise serializers.ValidationError('invalid Token')
-        
+            raise serializers.ValidationError('Invalid token')
+
         self.context['payload'] = payload
         return data
-    
+
     def save(self):
-        """Update user's verified status"""
+        """Update user's verified status."""
         payload = self.context['payload']
         user = User.objects.get(username=payload['user'])
         user.is_verified = True
